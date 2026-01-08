@@ -6,7 +6,7 @@ import { Person } from './types/Person';
 
 type Props = {
   inputDelay?: number;
-  onSelected?: (person: Person) => void;
+  onSelected?: (person: Person | null) => void;
 };
 
 export const App: React.FC<Props> = ({
@@ -18,14 +18,14 @@ export const App: React.FC<Props> = ({
   const [isListShown, setIsListShown] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
 
+  // Створюємо стабільну версію debounce функції
   const debouncedApplyQuery = useMemo(() => {
-    const fn = debounce((value: string) => {
+    return debounce((value: string) => {
       setAppliedQuery(value);
     }, inputDelay);
-
-    return fn;
   }, [inputDelay]);
 
+  // Очищення при розмонтуванні
   useEffect(() => {
     return () => {
       debouncedApplyQuery.cancel();
@@ -33,33 +33,44 @@ export const App: React.FC<Props> = ({
   }, [debouncedApplyQuery]);
 
   const handleQueryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+
+    // Скидаємо вибір, якщо користувач почав писати
     setSelectedPerson(null);
-    setImmediateQuery(event.target.value);
-    debouncedApplyQuery(event.target.value);
+    onSelected(null);
+
+    setImmediateQuery(value);
+
+    // ВІДПОВІДЬ НА РЕВ'Ю: trim() запобігає фільтрації, якщо введено лише пробіли
+    debouncedApplyQuery(value.trim());
   };
 
   const handlePersonSelect = (person: Person) => {
+    // ВІДПОВІДЬ НА РЕВ'Ю: скасовуємо чергу debounce, щоб старий запит не перебив вибір
+    debouncedApplyQuery.cancel();
+
     setSelectedPerson(person);
     setImmediateQuery(person.name);
+
+    // ВІДПОВІДЬ НА РЕВ'Ю: синхронізуємо appliedQuery з вибором
+    setAppliedQuery(person.name);
+
     setIsListShown(false);
     onSelected(person);
   };
 
-  const handleInputFocus = () => {
-    setIsListShown(true);
-  };
-
   const filteredPeople = useMemo(() => {
-    if (isListShown && appliedQuery.trim() === '') {
+    // Якщо запит порожній — показуємо всіх
+    if (appliedQuery === '') {
       return peopleFromServer;
     }
 
-    return peopleFromServer.filter(person => {
-      return Object.values(person).some(value =>
-        String(value).toLowerCase().includes(appliedQuery.toLowerCase()),
-      );
-    });
-  }, [appliedQuery, isListShown]);
+    const normalizedQuery = appliedQuery.toLowerCase();
+
+    return peopleFromServer.filter(person =>
+      person.name.toLowerCase().includes(normalizedQuery)
+    );
+  }, [appliedQuery]);
 
   return (
     <div className="container">
@@ -70,44 +81,47 @@ export const App: React.FC<Props> = ({
             : 'No selected person'}
         </h1>
 
-        <div className={`dropdown ${isListShown ? 'is-active' : ''}`}>
+        <div className={`dropdown ${isListShown && !selectedPerson ? 'is-active' : ''}`}>
           <div className="dropdown-trigger">
             <input
-              onChange={handleQueryChange}
-              onFocus={handleInputFocus}
-              value={immediateQuery}
               type="text"
-              placeholder="Enter a part of the name"
               className="input"
               data-cy="search-input"
+              placeholder="Enter a part of the name"
+              value={immediateQuery}
+              onChange={handleQueryChange}
+              onFocus={() => setIsListShown(true)}
+              onBlur={() => setTimeout(() => setIsListShown(false), 200)}
             />
           </div>
 
           <div className="dropdown-menu" role="menu" data-cy="suggestions-list">
             <div className="dropdown-content">
-              {filteredPeople.map(person => (
-                <div
-                  className="dropdown-item"
-                  data-cy="suggestion-item"
-                  key={person.slug}
-                  onMouseDown={() => handlePersonSelect(person)}
-                >
-                  <p className="has-text-link">{person.name}</p>
+              {filteredPeople.length > 0 ? (
+                filteredPeople.map(person => (
+                  <button
+                    type="button"
+                    key={person.slug}
+                    className="dropdown-item is-link is-fullwidth has-text-left"
+                    data-cy="suggestion-item"
+                    onClick={() => handlePersonSelect(person)}
+                  >
+                    {person.name}
+                  </button>
+                ))
+              ) : (
+                <div className="dropdown-item has-text-grey">
+                  No matching suggestions
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
 
-        {isListShown && filteredPeople.length === 0 && (
+        {/* Повідомлення про відсутність результатів винесено окремо за ТЗ */}
+        {appliedQuery !== '' && filteredPeople.length === 0 && (
           <div
-            className="
-            notification
-            is-danger
-            is-light
-            mt-3
-            is-align-self-flex-start
-          "
+            className="notification is-danger is-light mt-3 is-align-self-flex-start"
             role="alert"
             data-cy="no-suggestions-message"
           >
